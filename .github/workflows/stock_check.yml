@@ -1,0 +1,60 @@
+name: IKE_TOOL Scheduled Analysis
+
+on:
+  # 🌟 已經將內建的 schedule 刪除，只保留這個，專心讓 cron-job.org 呼叫
+  workflow_dispatch:
+
+jobs:
+  run-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60 
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 確保 rebase 過程有完整紀錄
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 安裝分析與 Parquet 處理所需套件
+          pip install yfinance shioaji pandas requests pytz loguru pyarrow
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run IKE_TOOL
+        run: |
+          export PYTHONPATH=$PYTHONPATH:.
+          python main.py
+
+      - name: Commit and Push data.json
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # 檢查 main.py 是否產出檔案於正確路徑
+          if [ -f "docs/data.json" ]; then
+            git add docs/data.json
+            
+            # 判斷有無變動，避免空的 commit
+            if ! git diff --quiet --staged; then
+              git commit -m "Auto-update data.json: $(date +'%Y-%m-%d %H:%M:%S')"
+              
+              # ★ 關鍵修正：處理衝突的強制更新策略
+              # 使用 -X theirs 在 rebase 衝突時強制採用「此次執行產出」的版本
+              git pull --rebase -X theirs origin main
+              git push origin main
+            else
+              echo "No changes in data.json, skipping push."
+            fi
+          else
+            echo "Error: docs/data.json not found! 程式執行可能未產出結果。"
+            exit 1
+          fi
